@@ -1,0 +1,183 @@
+import speech_recognition as sr
+import pyttsx3
+import datetime
+import webbrowser
+import os
+import subprocess
+import pywhatkit
+import wikipedia
+import pyjokes
+import openai
+from dotenv import load_dotenv
+import logging
+import platform
+
+# Initialize environment
+load_dotenv()
+openai.api_key = os.getenv('OPENAI_API_KEY')
+
+# Configure logging
+logging.basicConfig(
+    filename='jarvis.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Speech engine setup
+engine = pyttsx3.init()
+engine.setProperty('rate', 150)  # Slower speech rate for clarity
+voices = engine.getProperty('voices')
+if len(voices) > 1:
+    engine.setProperty('voice', voices[1].id)  # Female voice if available
+
+def speak(text):
+    """Convert text to speech with logging"""
+    print(f"JARVIS: {text}")
+    logging.info(f"Speaking: {text}")
+    engine.say(text)
+    engine.runAndWait()
+
+def listen_command():
+    """Listen to user command with improved reliability"""
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("\nListening... (Speak now)")
+        recognizer.adjust_for_ambient_noise(source, duration=1)
+        try:
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=8)
+            print("Processing your command...")
+            command = recognizer.recognize_google(audio).lower()
+            print(f"You said: {command}")
+            return command
+        except sr.WaitTimeoutError:
+            speak("I didn't hear anything. Please try again.")
+            return ""
+        except sr.UnknownValueError:
+            speak("I couldn't understand that. Please repeat.")
+            return ""
+        except Exception as e:
+            logging.error(f"Listening error: {e}")
+            speak("There was a microphone problem. Please check connections.")
+            return ""
+
+def open_application(app_name):
+    """Open applications with cross-platform support"""
+    apps = {
+        'chrome': ['chrome', 'google chrome', 'browser'],
+        'notepad': ['notepad', 'text editor'],
+        'calculator': ['calculator', 'calc'],
+        'word': ['word', 'microsoft word'],
+        'excel': ['excel', 'microsoft excel'],
+        'spotify': ['spotify', 'music']
+    }
+    
+    for app, keywords in apps.items():
+        if any(keyword in app_name for keyword in keywords):
+            try:
+                if platform.system() == 'Windows':
+                    os.system(f"start {app}")
+                elif platform.system() == 'Darwin':
+                    subprocess.run(['open', '-a', app])
+                else:
+                    subprocess.run(['xdg-open', app])
+                speak(f"Opening {app}")
+                return True
+            except Exception as e:
+                logging.error(f"Error opening {app}: {e}")
+                speak(f"Sorry, I couldn't open {app}")
+                return False
+    return False
+
+def answer_question(question):
+    """Answer general questions using OpenAI"""
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": question}],
+            max_tokens=150,
+            temperature=0.7
+        )
+        answer = response.choices[0].message.content
+        speak(answer)
+    except Exception as e:
+        logging.error(f"AI error: {e}")
+        speak("I'm having trouble answering that right now.")
+
+def execute_command(command):
+    """Execute the given command with proper error handling"""
+    if not command:
+        return
+    
+    try:
+        # System commands
+        if 'open' in command:
+            if not open_application(command):
+                speak("I don't know how to open that application")
+        
+        # Web commands
+        elif 'youtube' in command:
+            webbrowser.open("https://youtube.com")
+            speak("Opening YouTube")
+            
+        elif 'google' in command and 'open' in command:
+            webbrowser.open("https://google.com")
+            speak("Opening Google")
+            
+        elif 'play' in command and 'youtube' not in command:
+            song = command.replace('play', '').strip()
+            speak(f"Playing {song} on YouTube")
+            pywhatkit.playonyt(song)
+            
+        # Information commands
+        elif 'time' in command:
+            current_time = datetime.datetime.now().strftime("%I:%M %p")
+            speak(f"The current time is {current_time}")
+            
+        elif 'date' in command:
+            current_date = datetime.datetime.now().strftime("%B %d, %Y")
+            speak(f"Today's date is {current_date}")
+            
+        elif 'joke' in command:
+            speak(pyjokes.get_joke())
+            
+        elif 'wikipedia' in command or 'who is' in command or 'what is' in command:
+            search_term = command.split('wikipedia')[-1] if 'wikipedia' in command else command
+            speak(f"Searching Wikipedia for {search_term}")
+            try:
+                result = wikipedia.summary(search_term, sentences=2)
+                speak("According to Wikipedia:")
+                speak(result)
+            except wikipedia.exceptions.DisambiguationError:
+                speak("There are multiple matches. Please be more specific.")
+            except wikipedia.exceptions.PageError:
+                speak("I couldn't find information about that topic.")
+                
+        # Exit command
+        elif 'exit' in command or 'quit' in command or 'goodbye' in command:
+            speak("Goodbye! Have a great day.")
+            exit()
+            
+        # Answer any other question
+        else:
+            answer_question(command)
+            
+    except Exception as e:
+        logging.error(f"Command execution error: {e}")
+        speak("Sorry, I encountered an error processing that command.")
+
+def main():
+    """Main JARVIS program loop"""
+    speak("JARVIS at your service. How may I help you today?")
+    while True:
+        command = listen_command()
+        if command:
+            execute_command(command)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        speak("Shutting down JARVIS")
+    except Exception as e:
+        logging.critical(f"Fatal error: {e}")
+        speak("A critical error occurred. Please restart me.")
